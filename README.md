@@ -5,6 +5,15 @@
 Inspired by the ancient strategist Chanakya, this tool is designed to help penetration testers, bug bounty hunters, and cybersecurity professionals automate common tasks in vulnerability discovery.
 
 ![banner](https://img.shields.io/badge/Built%20With-Python3-blue?style=flat-square) ![MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)  
+
+> “Know your enemy before the battle.” – Chanakya
+
+
+## ⚠️ Disclaimer
+This tool is intended only for authorized security testing and educational purposes.
+Any misuse of this tool for attacking systems without permission is strictly prohibited.
+By using this software, you agree to take full responsibility for your actions.
+
 **Author:** VirusZzWarning · Twitter: [@hrisikesh_pal](https://twitter.com/hrisikesh_pal)
 
 ---
@@ -83,12 +92,5 @@ Connect with me:
 - YouTube: [JustHack_IT](https://www.youtube.com/@JustHack_IT)
 - Discord: [JustHack_IT](https://discord.com/invite/PUzR6YhXgR)
 
-> “Know your enemy before the battle.” – Chanakya
-
-
-## ⚠️ Disclaimer
-This tool is intended only for authorized security testing and educational purposes.
-Any misuse of this tool for attacking systems without permission is strictly prohibited.
-By using this software, you agree to take full responsibility for your actions.
 
 > Copyright © 2025, VirusZzWarning
