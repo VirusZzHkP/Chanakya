@@ -5,7 +5,7 @@
 Inspired by the ancient strategist Chanakya, this tool is designed to help penetration testers, bug bounty hunters, and cybersecurity professionals automate common tasks in vulnerability discovery.
 
 ![banner](https://img.shields.io/badge/Built%20With-Python3-blue?style=flat-square) ![MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square)  
-**Author:** VirusZzWarning · Twitter: [@VirusZzWarning](https://twitter.com/hrisikesh_pal)
+**Author:** VirusZzWarning · Twitter: [@hrisikesh_pal](https://twitter.com/hrisikesh_pal)
 
 ---
 
