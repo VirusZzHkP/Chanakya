@@ -57,6 +57,8 @@ python3 chanakya.py
 Follow the on-screen menu. For auto-dorking, ensure dorks.txt is populated.
 
 ## 📸 Screenshot
+![Chanakya](/img/image.png "Chanakya's-Terminal look").
+
 
 ## 📁 Directory Structure
 ```text
