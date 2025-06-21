@@ -1,4 +1,15 @@
-#v2.1.4
+#v2.2.4
+# [MODIFIED CHANAKYA TOOL WITH SERPAPI, SCRAPINGANT, GOOGLE CSE SUPPORT]
+
+# ✅ NOTE: This version removes all the search engines as it was blocking automation process.
+# ✅ Adds support for:
+#  1. SerpAPI
+#  2. ScrapingAnt
+#  3. Google Custom Search (CSE)
+#  4. Proxy rotation remains intact
+#
+# ⚠️ You must add your API keys in .env file before running this tool to avoid errors.
+
 
 import nmap
 import os
@@ -14,6 +25,15 @@ import random
 import subprocess
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+from dotenv import load_dotenv
+import os
+load_dotenv()  # Load from .env file
+
+SERPAPI_KEY = os.getenv("SERPAPI_KEY")
+SCRAPINGANT_KEY = os.getenv("SCRAPINGANT_KEY")
+GOOGLE_CSE_API_KEY = os.getenv("GOOGLE_CSE_API_KEY")
+GOOGLE_CSE_CX = os.getenv("GOOGLE_CSE_CX")
+
 
 # Define color variables
 RED = "\033[91m"
@@ -36,15 +56,6 @@ USER_AGENTS = [
     "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36",
     "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
 ]
-
-def fetch_and_save_valid_proxies():
-    print(GREEN + "[*] Fetching fresh HTTP proxies..." + RESET)
-    proxies = get_valid_proxies()
-    if proxies:
-        print(GREEN + f"[+] {len(proxies)} valid proxies saved to valid_proxies.txt" + RESET)
-    else:
-        print(RED + "[!] No valid proxies found." + RESET)
-
 
 def test_proxy(proxy):
     try:
@@ -123,108 +134,45 @@ def get_random_proxy():
         print(RED + "[!] valid_proxies.txt not found. Please fetch proxies first." + RESET)
         return None
 
-
-def try_bing_request(dork, use_proxies=True, retries=3):
-    headers = get_random_headers()
-    url = f"https://www.bing.com/search?q={urllib.parse.quote(dork)}"
-
-    for attempt in range(1, retries + 1):
-        proxy = get_random_proxy() if use_proxies else None
-        proxies = proxy if proxy else {}
-
-        try:
-            print(YELLOW + f"[*] Trying Bing (attempt {attempt}/{retries})..." + RESET)
-            response = requests.get(url, headers=headers, proxies=proxies, timeout=10, verify=False)
-            if response.status_code == 200:
-                return BeautifulSoup(response.text, "html.parser")
-        except Exception as e:
-            print(RED + f"[!] Bing request failed: {e}" + RESET)
-            if not use_proxies:
-                break
-    return None
-
-
-def try_google_request(dork, use_proxies=True, retries=3):
-    headers = get_random_headers()
-    url = f"https://www.google.com/search?q={urllib.parse.quote(dork)}"
-
-    for attempt in range(1, retries + 1):
-        proxy = get_random_proxy() if use_proxies else None
-        proxies = proxy if proxy else {}
-
-        try:
-            print(YELLOW + f"[*] Trying Google (attempt {attempt}/{retries})..." + RESET)
-            response = requests.get(url, headers=headers, proxies=proxies, timeout=10, verify=False)
-            if response.status_code == 200:
-                return BeautifulSoup(response.text, "html.parser")
-        except Exception as e:
-            print(RED + f"[!] Google request failed: {e}" + RESET)
-            if not use_proxies:
-                break
-    return None
-
-
-def try_yahoo_request(dork, use_proxies=True, retries=3):
-    headers = get_random_headers()
-    url = f"https://search.yahoo.com/search?p={urllib.parse.quote(dork)}"
-
-    for attempt in range(1, retries + 1):
-        proxy = get_random_proxy() if use_proxies else None
-        proxies = proxy if proxy else {}
-
-        try:
-            print(YELLOW + f"[*] Trying Yahoo (attempt {attempt}/{retries})..." + RESET)
-            response = requests.get(url, headers=headers, proxies=proxies, timeout=10, verify=False)
-            if response.status_code == 200:
-                return BeautifulSoup(response.text, "html.parser")
-        except Exception as e:
-            print(RED + f"[!] Yahoo request failed: {e}" + RESET)
-            if not use_proxies:
-                break
-    return None
-
-
-def try_duckduckgo_request(dork, use_proxies=True, retries=3):
-    headers = get_random_headers()
-
-    if use_proxies:
-        for attempt in range(1, retries + 1):
-            proxy = get_random_proxy()
-            proxies = proxy if proxy else {}
-
-            try:
-                print(YELLOW + f"[*] Trying DuckDuckGo with proxy (attempt {attempt}/{retries})..." + RESET)
-                response = requests.post(
-                    "https://html.duckduckgo.com/html/",
-                    headers=headers,
-                    data={"q": dork},
-                    proxies=proxies,
-                    timeout=10,
-                    verify=False
-                )
-                if response.status_code == 200:
-                    return BeautifulSoup(response.text, 'html.parser')
-            except Exception as e:
-                print(RED + f"[!] Proxy failed (attempt {attempt}/{retries}): {e}" + RESET)
-
-        print(YELLOW + "[*] All proxies failed. Retrying without proxy..." + RESET)
-
-    # Fallback (or direct if proxies disabled)
+# -- SERPAPI FUNCTION --
+def serpapi_dork_search(dork):
     try:
-        response = requests.post(
-            "https://html.duckduckgo.com/html/",
-            headers=headers,
-            data={"q": dork},
-            timeout=10,
-            verify=False
-        )
-        if response.status_code == 200:
-            return BeautifulSoup(response.text, 'html.parser')
+        params = {
+            "q": dork,
+            "engine": "google",
+            "api_key": SERPAPI_KEY
+        }
+        print("[*] Searching with SerpAPI...")
+        res = requests.get("https://serpapi.com/search", params=params)
+        data = res.json()
+        return [item["link"] for item in data.get("organic_results", []) if "link" in item]
     except Exception as e:
-        print(RED + f"[!] DuckDuckGo request failed: {e}" + RESET)
+        print(f"[!] SerpAPI failed: {e}")
+        return []
 
-    return None
+# -- SCRAPINGANT FUNCTION --
+def scrapingant_dork_search(dork):
+    try:
+        print("[*] Searching with ScrapingAnt...")
+        url = f"https://api.scrapingant.com/v2/search?query={dork}&api_key={SCRAPINGANT_KEY}&country=us"
+        res = requests.get(url)
+        data = res.json()
+        return [item["url"] for item in data.get("organic", [])]
+    except Exception as e:
+        print(f"[!] ScrapingAnt failed: {e}")
+        return []
 
+# -- GOOGLE CSE FUNCTION --
+def google_cse_dork_search(dork):
+    try:
+        print("[*] Searching with Google CSE...")
+        url = f"https://www.googleapis.com/customsearch/v1?q={dork}&key={GOOGLE_CSE_API_KEY}&cx={GOOGLE_CSE_CX}"
+        res = requests.get(url)
+        data = res.json()
+        return [item["link"] for item in data.get("items", []) if "link" in item]
+    except Exception as e:
+        print(f"[!] Google CSE failed: {e}")
+        return []
 
 
 DORKED_HISTORY_FILE = "scanned_dork_links.txt"
@@ -379,27 +327,42 @@ def sql_injection_advanced(url):
             run_sqlmap_command(cmd + ["-D", dbname, "-T", table, "--dump"])
 
 
-def choose_search_engine():
-    print(CYAN + "[?] Choose a search engine for dorking:" + RESET)
-    print("1. DuckDuckGo")
-    print("2. Bing")
-    print("3. Google (less reliable, may block)")
-    print("4. Yahoo")
-    choice = input(GREEN + "> " + RESET)
+# -- USER CHOICE MENU --
+def choose_dorking_method():
+    print("\n[?] Choose dorking provider:")
+    print("1. SerpAPI")
+    print("2. ScrapingAnt")
+    print("3. Google CSE")
+    choice = input("Select option (1/2/3): ").strip()
+    if choice == "1":
+        return serpapi_dork_search
+    elif choice == "2":
+        return scrapingant_dork_search
+    elif choice == "3":
+        return google_cse_dork_search
+    else:
+        print("[!] Invalid choice, defaulting to SerpAPI")
+        return serpapi_dork_search
 
-    engines = {
-        "1": "duckduckgo",
-        "2": "bing",
-        "3": "google",
-        "4": "yahoo"
-    }
-    return engines.get(choice, "duckduckgo")
-
-
+def extract_urls_from_soup(results):
+    """
+    Takes a list of result URLs (strings) and returns unique ones with '=' in them.
+    Handles duplicates and formats if necessary.
+    """
+    urls = set()
+    for link in results:
+        if isinstance(link, str) and "=" in link:
+            urls.add(link.strip())
+    return urls
 
 def auto_dorking():
-    engine = choose_search_engine()
-    use_proxies = input(CYAN + "[?] Do you want to use proxies while dorking? (yes/no): " + RESET).lower().startswith("y")
+    print(CYAN + "[?] Choose a dorking service:" + RESET)
+    print("1. SerpAPI")
+    print("2. ScrapingAnt")
+    print("3. Google Programmable Search (CSE)")
+    service = input(GREEN + "> " + RESET).strip()
+
+    use_proxies = input(CYAN + "[?] Do you want to use proxies while scraping? (yes/no): " + RESET).lower().startswith("y")
 
     try:
         with open("dorks.txt", "r") as f:
@@ -409,69 +372,36 @@ def auto_dorking():
         return
 
     dorks = [f"inurl:{d}" if not d.lower().startswith("inurl:") else d for d in raw_dorks]
-
     found_urls = []
     scanned_history = load_dorked_history()
     new_links = set()
 
     for dork in dorks:
         print(CYAN + f"[*] Searching dork: {dork}" + RESET)
-        if engine == "duckduckgo":
-            soup = try_duckduckgo_request(dork, use_proxies=use_proxies)
-        elif engine == "bing":
-            soup = try_bing_request(dork, use_proxies=use_proxies)
-        elif engine == "google":
-            soup = try_google_request(dork, use_proxies=use_proxies)
-        elif engine == "yahoo":
-            soup = try_yahoo_request(dork, use_proxies=use_proxies)
+
+        # Choose scraping function
+        if service == "1":
+            result_urls = serpapi_dork_search(dork)
+        elif service == "2":
+            result_urls = scrapingant_dork_search(dork)  # removed invalid param
+        elif service == "3":
+            result_urls = google_cse_dork_search(dork)
         else:
-            print(RED + "[!] Unknown search engine. Skipping..." + RESET)
+            print(RED + "[!] Invalid service option." + RESET)
+            return
+
+        if not result_urls:
+            print(RED + f"[!] Skipping dork due to failed fetch: {dork}" + RESET)
             continue
 
-
-        if not soup:
-            print(RED + f"[!] Skipping dork due to repeated failure: {dork}" + RESET)
-            continue
-
-        urls = set()
-
-        if engine == "duckduckgo":
-            results = soup.find_all("a", class_="result__a")
-            for link in results:
-                url = link.get("href")
-                if url:
-                    urls.add(url)
-
-        elif engine == "bing":
-            for a in soup.select("li.b_algo h2 a"):
-                href = a.get("href")
-                if href:
-                    urls.add(href)
-
-        elif engine == "google":
-            for a in soup.select("div.yuRUbf > a"):
-                href = a.get("href")
-                if href:
-                    urls.add(href)
-
-        elif engine == "yahoo":
-            for a in soup.select("h3.title > a"):
-                href = a.get("href")
-                if href:
-                    urls.add(href)
-
+        urls = extract_urls_from_soup(result_urls)
         for url in urls:
-            if "=" in url and url not in scanned_history:
+            if url not in scanned_history:
                 print(GREEN + f"[+] Found new: {url}" + RESET)
                 found_urls.append(url)
                 new_links.add(url)
 
-            if url and "=" in url and url not in scanned_history:
-                print(GREEN + f"[+] Found new: {url}" + RESET)
-                found_urls.append(url)
-                new_links.add(url)
-
-        time.sleep(random.uniform(2, 5))
+        time.sleep(random.uniform(2, 4))
 
     vuln_sites = []
     for url in found_urls:
@@ -511,7 +441,6 @@ def auto_dorking():
         print(YELLOW + "[*] No new vulnerable sites found." + RESET)
 
 
-
 def main():
     while True:
         print(CYAN + "[+] Recon, Exploit, or Exit? Choose wisely:" + RESET)
@@ -535,7 +464,7 @@ def main():
         elif option == "4":
             auto_dorking()
         elif option == "5":
-            fetch_and_save_valid_proxies()
+            get_valid_proxies()
         elif option == "6":
             print(RED + "[*] Exiting the program..." + RESET)
             print(YELLOW + "[♥] Made with ♥ by VirusZzWarning" + RESET)
