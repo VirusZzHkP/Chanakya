@@ -3,4 +3,4 @@ sqlmap
 requests>=2.31.0
 beautifulsoup4>=4.12.3
 urllib3>=2.2.1
-
+python-dotenv
