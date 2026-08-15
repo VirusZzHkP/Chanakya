@@ -1,481 +1,1374 @@
-#v2.2.4
-# [MODIFIED CHANAKYA TOOL WITH SERPAPI, SCRAPINGANT, GOOGLE CSE SUPPORT]
+"""
+CHANAKYA
+========
 
-# ✅ NOTE: This version removes all the search engines as it was blocking automation process.
-# ✅ Adds support for:
-#  1. SerpAPI
-#  2. ScrapingAnt
-#  3. Google Custom Search (CSE)
-#  4. Proxy rotation remains intact
-#
-# ⚠️ You must add your API keys in .env file before running this tool to avoid errors.
+Main CLI / application entry point.
 
+Architecture:
 
-import nmap
-import os
-import socket
+    chanakya.py
+        |
+        +-- scanners.network
+        |      +-- Port scanning
+        |      +-- Service scanning
+        |
+        +-- scanners.sqli
+        |      +-- SQL injection
+        |
+        +-- attack.idor.scanner
+        |      +-- IDOR / BOLA
+        |
+        +-- attack.jwt.scanner
+        |      +-- JWT security testing
+        |
+        +-- scanners.command_injection
+        |      +-- Command injection
+        |
+        +-- scanners.xss
+        |      +-- XSS
+        |
+        +-- scanners.dorking
+        |      +-- Search-engine reconnaissance
+        |      +-- Scope validation
+        |      +-- URL normalization
+        |      +-- AI analysis
+        |      +-- SQLi indication
+        |      +-- SQLMap handoff
+        |
+        +-- AI
+        |      +-- Finding analysis
+        |
+        +-- Proxy utilities
+
+IMPORTANT:
+    Chanakya is intended for authorized security testing only.
+"""
+
+from __future__ import annotations
+
+import importlib
 import logging
-import requests
-from bs4 import BeautifulSoup
-from datetime import datetime
-import urllib.parse
-import traceback
-import time
-import random
-import subprocess
-import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-from dotenv import load_dotenv
 import os
-load_dotenv()  # Load from .env file
+import platform
+import random
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Callable
 
-SERPAPI_KEY = os.getenv("SERPAPI_KEY")
-SCRAPINGANT_KEY = os.getenv("SCRAPINGANT_KEY")
-GOOGLE_CSE_API_KEY = os.getenv("GOOGLE_CSE_API_KEY")
-GOOGLE_CSE_CX = os.getenv("GOOGLE_CSE_CX")
+import requests
+import urllib3
+from dotenv import load_dotenv
+
+from ai.analyzer import ai_analyzer
+
+from scanners.network import (
+    scan_ports,
+    scan_services,
+)
+
+from scanners.sqli import (
+    sql_injection_advanced,
+)
+
+from scanners.dorking import (
+    auto_dorking,
+)
+
+from utils.colors import (
+    RED,
+    GREEN,
+    CYAN,
+    MAGENTA,
+    YELLOW,
+    RESET,
+)
 
 
-# Define color variables
-RED = "\033[91m"
-GREEN = "\033[92m"
-CYAN = "\033[96m"
-MAGENTA = "\033[95m"
-YELLOW = "\033[93m"
-WHITE = "\033[97m"
-RESET = "\033[0m"
+# ============================================================
+# ENVIRONMENT
+# ============================================================
 
-# Setup logging
-logging.basicConfig(filename="scanner.log", level=logging.INFO,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+load_dotenv()
 
-# Headers and IP rotation_common user-agents from different OSes and browsers (as of 2025)
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64; rv:122.0) Gecko/20100101 Firefox/122.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_3_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.4 Safari/605.1.15",
-    "Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36",
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
-]
 
-def test_proxy(proxy):
+# ============================================================
+# LOGGING
+# ============================================================
+
+logging.basicConfig(
+    filename="scanner.log",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# HTTP SETTINGS
+# ============================================================
+
+urllib3.disable_warnings(
+    urllib3.exceptions.InsecureRequestWarning
+)
+
+
+# ============================================================
+# PROXY CONFIGURATION
+# ============================================================
+
+HTTP_PROXY_LIST_URL = (
+    "https://proxyspace.pro/http.txt"
+)
+
+PROXY_VALIDATION_URL = (
+    "https://httpbin.org/ip"
+)
+
+
+# ============================================================
+# ATTACK MODULE DEFINITIONS
+# ============================================================
+
+ATTACK_MODULES: dict[str, dict[str, Any]] = {
+
+    "idor": {
+        "module": "attack.idor.scanner",
+        "functions": (
+            "run_idor_scan",
+            "scan_idor",
+            "idor_scan",
+            "run_idor",
+            "test_idor",
+        ),
+    },
+
+    "jwt": {
+        "module": "attack.jwt.scanner",
+        "functions": (
+            "run_jwt_scan",
+            "scan_jwt",
+            "jwt_scan",
+            "run_jwt",
+            "test_jwt",
+        ),
+    },
+
+    "command_injection": {
+        "module": "scanners.command_injection",
+        "functions": (
+            "run_command_injection",
+            "scan_command_injection",
+            "command_injection_scan",
+            "test_command_injection",
+        ),
+    },
+
+    "xss": {
+        "module": "scanners.xss",
+        "functions": (
+            "run_xss_scan",
+            "scan_xss",
+            "xss_scan",
+            "run_xss",
+            "test_xss",
+        ),
+    },
+}
+
+
+# ============================================================
+# ATTACK MODULE LOADER
+# ============================================================
+
+def load_attack_function(
+    attack_name: str,
+) -> Callable[..., Any] | None:
+    """
+    Dynamically load an attack scanner.
+
+    Optional attack modules are loaded only when requested.
+    Therefore, a broken optional module does not prevent
+    Chanakya's main CLI from starting.
+
+    Returns:
+        Callable scanner function or None.
+    """
+
+    config = ATTACK_MODULES.get(
+        attack_name
+    )
+
+    if config is None:
+
+        print(
+            RED
+            + f"[!] Unknown attack module: {attack_name}"
+            + RESET
+        )
+
+        return None
+
+    module_name = config["module"]
+    function_names = config["functions"]
+
+    # --------------------------------------------------------
+    # Import module
+    # --------------------------------------------------------
+
     try:
-        test_url = "https://httpbin.org/ip"
-        res = requests.get(test_url, proxies={"http": proxy, "https": proxy}, timeout=5, verify=False)
-        return res.status_code == 200
-    except:
+
+        module = importlib.import_module(
+            module_name
+        )
+
+    except Exception as exc:
+
+        logger.exception(
+            "Failed to import attack module %s",
+            module_name,
+        )
+
+        print()
+        print(
+            RED
+            + f"[!] Failed to load {attack_name} module."
+            + RESET
+        )
+
+        print(
+            YELLOW
+            + f"    Module: {module_name}"
+            + RESET
+        )
+
+        print(
+            YELLOW
+            + f"    Error : {exc}"
+            + RESET
+        )
+
+        return None
+
+    # --------------------------------------------------------
+    # Find supported scanner function
+    # --------------------------------------------------------
+
+    for function_name in function_names:
+
+        function = getattr(
+            module,
+            function_name,
+            None,
+        )
+
+        if callable(function):
+
+            logger.info(
+                "Loaded attack scanner %s.%s",
+                module_name,
+                function_name,
+            )
+
+            return function
+
+    # --------------------------------------------------------
+    # No supported function
+    # --------------------------------------------------------
+
+    print()
+    print(
+        RED
+        + f"[!] No supported scanner function found "
+          f"in {module_name}."
+        + RESET
+    )
+
+    print(
+        YELLOW
+        + "[*] Expected one of:"
+        + RESET
+    )
+
+    for function_name in function_names:
+
+        print(
+            f"    - {function_name}"
+        )
+
+    return None
+
+
+# ============================================================
+# RESULT DISPLAY
+# ============================================================
+
+def display_scanner_result(
+    result: Any,
+) -> None:
+    """
+    Display a scanner result without assuming a specific
+    result structure.
+    """
+
+    if result is None:
+        return
+
+    print()
+
+    print(
+        GREEN
+        + "[+] Scanner returned a result."
+        + RESET
+    )
+
+    # --------------------------------------------------------
+    # Dictionary result
+    # --------------------------------------------------------
+
+    if isinstance(result, dict):
+
+        print(
+            CYAN
+            + "[*] Result summary:"
+            + RESET
+        )
+
+        for key, value in result.items():
+
+            print(
+                f"    {key}: {value}"
+            )
+
+        return
+
+    # --------------------------------------------------------
+    # List result
+    # --------------------------------------------------------
+
+    if isinstance(result, list):
+
+        print(
+            CYAN
+            + f"[*] Results: {len(result)}"
+            + RESET
+        )
+
+        return
+
+    # --------------------------------------------------------
+    # Other result types
+    # --------------------------------------------------------
+
+    print(
+        CYAN
+        + "[*] Result:"
+        + RESET
+    )
+
+    print(
+        f"    {result}"
+    )
+
+
+# ============================================================
+# GENERIC ATTACK RUNNER
+# ============================================================
+
+def run_attack_module(
+    attack_name: str,
+    display_name: str,
+) -> None:
+    """
+    Run one of Chanakya's attack-validation modules.
+
+    The target is supplied by the operator and passed directly
+    to the selected scanner.
+    """
+
+    print()
+
+    print(
+        CYAN
+        + "=" * 70
+        + RESET
+    )
+
+    print(
+        CYAN
+        + f"{display_name:^70}"
+        + RESET
+    )
+
+    print(
+        CYAN
+        + "=" * 70
+        + RESET
+    )
+
+    print(
+        YELLOW
+        + "[!] Only test systems you own or are explicitly "
+          "authorized to assess."
+        + RESET
+    )
+
+    target = get_target(
+        "\nTarget URL > "
+    )
+
+    if target is None:
+        return
+
+    scanner = load_attack_function(
+        attack_name
+    )
+
+    if scanner is None:
+        return
+
+    print()
+
+    print(
+        GREEN
+        + f"[+] Target: {target}"
+        + RESET
+    )
+
+    print(
+        CYAN
+        + f"[*] Starting {display_name}..."
+        + RESET
+    )
+
+    try:
+
+        result = scanner(
+            target
+        )
+
+        display_scanner_result(
+            result
+        )
+
+        print()
+
+        print(
+            GREEN
+            + f"[+] {display_name} completed."
+            + RESET
+        )
+
+    except TypeError as exc:
+
+        logger.exception(
+            "%s scanner interface error.",
+            display_name,
+        )
+
+        print()
+
+        print(
+            RED
+            + f"[!] {display_name} interface mismatch."
+            + RESET
+        )
+
+        print(
+            YELLOW
+            + f"    {exc}"
+            + RESET
+        )
+
+        print(
+            YELLOW
+            + "[*] Check the scanner function signature."
+            + RESET
+        )
+
+    except KeyboardInterrupt:
+
+        print(
+            RED
+            + f"\n[!] {display_name} interrupted."
+            + RESET
+        )
+
+    except Exception as exc:
+
+        logger.exception(
+            "%s scanner failed.",
+            display_name,
+        )
+
+        print()
+
+        print(
+            RED
+            + f"[!] {display_name} failed."
+            + RESET
+        )
+
+        print(
+            YELLOW
+            + f"    Error: {exc}"
+            + RESET
+        )
+
+
+# ============================================================
+# PROXY VALIDATION
+# ============================================================
+
+def test_proxy(
+    proxy: str,
+) -> bool:
+    """
+    Check whether a proxy can reach the validation endpoint.
+    """
+
+    try:
+
+        response = requests.get(
+            PROXY_VALIDATION_URL,
+            proxies={
+                "http": proxy,
+                "https": proxy,
+            },
+            timeout=5,
+            verify=False,
+        )
+
+        return response.status_code == 200
+
+    except requests.RequestException:
+
         return False
 
 
-from concurrent.futures import ThreadPoolExecutor
-HTTP_PROXY_LIST_URL = "https://proxyspace.pro/http.txt"
+def get_valid_proxies(
+    limit: int = 150,
+) -> list[str]:
+    """
+    Fetch public HTTP proxies and validate them concurrently.
 
-def get_valid_proxies(limit=150):
+    Valid proxies are saved to:
+
+        valid_proxies.txt
+    """
+
+    # --------------------------------------------------------
+    # Fetch proxy list
+    # --------------------------------------------------------
+
     try:
-        print(CYAN + "[*] Fetching HTTP proxy list..." + RESET)
-        response = requests.get(HTTP_PROXY_LIST_URL, timeout=10)
-        raw = response.text.strip().split('\n')
-        candidates = ["http://" + p.strip() for p in raw if p.strip()][:limit]
-    except Exception as e:
-        print(RED + f"[!] Failed to fetch proxy list: {e}" + RESET)
+
+        print(
+            CYAN
+            + "[*] Fetching HTTP proxy list..."
+            + RESET
+        )
+
+        response = requests.get(
+            HTTP_PROXY_LIST_URL,
+            timeout=10,
+        )
+
+        response.raise_for_status()
+
+        raw = (
+            response.text
+            .strip()
+            .splitlines()
+        )
+
+    except requests.RequestException as exc:
+
+        logger.exception(
+            "Failed to fetch proxy list."
+        )
+
+        print(
+            RED
+            + f"[!] Failed to fetch proxy list: {exc}"
+            + RESET
+        )
+
         return []
 
-    print(CYAN + f"[*] Validating up to {len(candidates)} proxies..." + RESET)
-    valid = []
-    with ThreadPoolExecutor(max_workers=20) as exe:
-        futures = {exe.submit(test_proxy, proxy): proxy for proxy in candidates}
-        for future in futures:
-            proxy = futures[future]
-            if future.result():
-                valid.append(proxy)
+    # --------------------------------------------------------
+    # Normalize candidates
+    # --------------------------------------------------------
 
-    if valid:
-        with open("valid_proxies.txt", "w") as f:
-            for p in valid:
-                f.write(p + "\n")
-        print(GREEN + f"[+] {len(valid)} valid proxies saved to valid_proxies.txt" + RESET)
-    else:
-        print(RED + "[!] No valid proxies found after validation." + RESET)
+    candidates: list[str] = []
+
+    for proxy in raw:
+
+        proxy = proxy.strip()
+
+        if not proxy:
+            continue
+
+        if not proxy.startswith(
+            (
+                "http://",
+                "https://",
+            )
+        ):
+
+            proxy = (
+                "http://"
+                + proxy
+            )
+
+        candidates.append(
+            proxy
+        )
+
+        if len(candidates) >= limit:
+            break
+
+    if not candidates:
+
+        print(
+            RED
+            + "[!] No proxy candidates were returned."
+            + RESET
+        )
+
+        return []
+
+    print(
+        CYAN
+        + f"[*] Validating up to "
+          f"{len(candidates)} proxies..."
+        + RESET
+    )
+
+    # --------------------------------------------------------
+    # Concurrent validation
+    # --------------------------------------------------------
+
+    valid: list[str] = []
+
+    with ThreadPoolExecutor(
+        max_workers=min(
+            20,
+            len(candidates),
+        )
+    ) as executor:
+
+        results = executor.map(
+            test_proxy,
+            candidates,
+        )
+
+        for proxy, is_valid in zip(
+            candidates,
+            results,
+        ):
+
+            if is_valid:
+
+                valid.append(
+                    proxy
+                )
+
+    # --------------------------------------------------------
+    # Save results
+    # --------------------------------------------------------
+
+    if not valid:
+
+        print(
+            RED
+            + "[!] No valid proxies found after validation."
+            + RESET
+        )
+
+        return []
+
+    try:
+
+        with open(
+            "valid_proxies.txt",
+            "w",
+            encoding="utf-8",
+        ) as file:
+
+            for proxy in valid:
+
+                file.write(
+                    proxy
+                    + "\n"
+                )
+
+    except OSError as exc:
+
+        logger.exception(
+            "Failed to save proxy list."
+        )
+
+        print(
+            RED
+            + "[!] Failed to save valid proxies: "
+              f"{exc}"
+            + RESET
+        )
+
+        return valid
+
+    print(
+        GREEN
+        + f"[+] {len(valid)} valid proxies saved "
+          "to valid_proxies.txt"
+        + RESET
+    )
 
     return valid
 
 
-def load_proxies_from_file():
+# ============================================================
+# PROXY FILE HELPERS
+# ============================================================
+
+def load_proxies_from_file() -> list[str]:
+    """
+    Load previously validated proxies.
+    """
+
     try:
-        with open("valid_proxies.txt", "r") as f:
-            proxies = [line.strip() for line in f if line.strip()]
-            print(CYAN + f"[*] Loaded {len(proxies)} valid proxies from file." + RESET)
-            return proxies
+
+        with open(
+            "valid_proxies.txt",
+            "r",
+            encoding="utf-8",
+        ) as file:
+
+            proxies = [
+                line.strip()
+                for line in file
+                if line.strip()
+            ]
+
+        print(
+            CYAN
+            + f"[*] Loaded {len(proxies)} valid proxies "
+              "from file."
+            + RESET
+        )
+
+        return proxies
+
     except FileNotFoundError:
-        print(YELLOW + "[!] Proxy file not found. Fetch new proxies from the menu." + RESET)
+
         return []
 
-PROXIES = load_proxies_from_file()
+    except OSError as exc:
+
+        logger.exception(
+            "Failed to load proxy file."
+        )
+
+        print(
+            RED
+            + f"[!] Failed to load proxy file: {exc}"
+            + RESET
+        )
+
+        return []
 
 
-def get_random_headers():
-    return {
-        "User-Agent": random.choice(USER_AGENTS),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Connection": "keep-alive"
-    }
+def get_random_proxy() -> dict[str, str] | None:
+    """
+    Return a randomly selected validated proxy.
+    """
 
-def get_random_proxy():
-    try:
-        with open("valid_proxies.txt", "r") as f:
-            proxies = [line.strip() for line in f if line.strip()]
-        if proxies:
-            proxy = random.choice(proxies)
-            return {"http": proxy, "https": proxy}
-        else:
-            print(YELLOW + "[!] No proxies available in valid_proxies.txt." + RESET)
-            return None
-    except FileNotFoundError:
-        print(RED + "[!] valid_proxies.txt not found. Please fetch proxies first." + RESET)
+    proxies = load_proxies_from_file()
+
+    if not proxies:
+
+        print(
+            YELLOW
+            + "[!] No proxies available in "
+              "valid_proxies.txt."
+            + RESET
+        )
+
         return None
 
-# -- SERPAPI FUNCTION --
-def serpapi_dork_search(dork):
-    try:
-        params = {
-            "q": dork,
-            "engine": "google",
-            "api_key": SERPAPI_KEY
-        }
-        print("[*] Searching with SerpAPI...")
-        res = requests.get("https://serpapi.com/search", params=params)
-        data = res.json()
-        return [item["link"] for item in data.get("organic_results", []) if "link" in item]
-    except Exception as e:
-        print(f"[!] SerpAPI failed: {e}")
-        return []
+    proxy = random.choice(
+        proxies
+    )
 
-# -- SCRAPINGANT FUNCTION --
-def scrapingant_dork_search(dork):
-    try:
-        print("[*] Searching with ScrapingAnt...")
-        url = f"https://api.scrapingant.com/v2/search?query={dork}&api_key={SCRAPINGANT_KEY}&country=us"
-        res = requests.get(url)
-        data = res.json()
-        return [item["url"] for item in data.get("organic", [])]
-    except Exception as e:
-        print(f"[!] ScrapingAnt failed: {e}")
-        return []
+    return {
+        "http": proxy,
+        "https": proxy,
+    }
 
-# -- GOOGLE CSE FUNCTION --
-def google_cse_dork_search(dork):
-    try:
-        print("[*] Searching with Google CSE...")
-        url = f"https://www.googleapis.com/customsearch/v1?q={dork}&key={GOOGLE_CSE_API_KEY}&cx={GOOGLE_CSE_CX}"
-        res = requests.get(url)
-        data = res.json()
-        return [item["link"] for item in data.get("items", []) if "link" in item]
-    except Exception as e:
-        print(f"[!] Google CSE failed: {e}")
-        return []
+# ============================================================
+# UI
+# ============================================================
 
+CHANAKYA_VERSION = "3.1.6"
 
-DORKED_HISTORY_FILE = "scanned_dork_links.txt"
-
-def load_dorked_history():
-    try:
-        with open(DORKED_HISTORY_FILE, "r") as f:
-            return set(line.strip() for line in f)
-    except FileNotFoundError:
-        return set()
-
-def save_dorked_history(urls):
-    with open(DORKED_HISTORY_FILE, "a") as f:
-        for url in urls:
-            if url.strip():
-                f.write(url.strip() + "\n")
-
-# Rotating captions (1 per run)
 captions = [
     "Recon. Exploit. Dominate. #ChanakyaMindset",
     "Be the strategist, not the pawn.",
     "Where security meets ancient intelligence.",
     "One step ahead — the Chanakya way.",
-    "Every system has a weakness — know it before others do."
+    "Every system has a weakness — know it before others do.",
 ]
+
+# Select a different caption whenever this module is loaded.
 caption = random.choice(captions)
 
-# UI Title Banner
+
 title = f"""
 {RED}
-       ██████ ██   ██  █████  ███    ██  █████  ██   ██ ██    ██  █████  
-      ██      ██   ██ ██   ██ ████   ██ ██   ██ ██  ██   ██  ██  ██   ██ 
-      ██      ███████ ███████ ██ ██  ██ ███████ █████     ████   ███████ 
-      ██      ██   ██ ██   ██ ██  ██ ██ ██   ██ ██  ██     ██    ██   ██ 
-       ██████ ██   ██ ██   ██ ██   ████ ██   ██ ██   ██    ██    ██   ██ 
+       ██████ ██   ██  █████  ███    ██  █████  ██   ██ ██    ██  █████
+      ██      ██   ██ ██   ██ ████   ██ ██   ██ ██  ██   ██  ██  ██   ██
+      ██      ███████ ███████ ██ ██  ██ ███████ █████     ████   ███████
+      ██      ██   ██ ██   ██ ██  ██ ██ ██   ██ ██  ██     ██    ██   ██
+       ██████ ██   ██ ██   ██ ██   ████ ██   ██ ██   ██    ██    ██   ██
 {RESET}
 
 {CYAN}{'“Know your enemy before the battle.” – Chanakya'.center(80)}{RESET}
+
+{YELLOW}{f'CHANAKYA v{CHANAKYA_VERSION}'.center(80)}{RESET}
+{YELLOW}{'A JustHackIT Security Intelligence Framework'.center(80)}{RESET}
 {YELLOW}{caption.center(80)}{RESET}
 
 {MAGENTA}{'Made with ♥ by VirusZzWarning'.center(80)}{RESET}
-{MAGENTA}{'⚔️  Follow me on Twitter: @hrisikesh_pal'.center(80)}{RESET}
 
+{MAGENTA}{'JustHackIT'.center(80)}{RESET}
+{MAGENTA}{'Website  : justhackit.in'.center(80)}{RESET}
+{MAGENTA}{'Instagram: @justhackit.in'.center(80)}{RESET}
+{MAGENTA}{'X        : @JustHackIT_HQ'.center(80)}{RESET}
 
 {RED}{'[!] WARNING: This tool is intended for educational and authorized testing only,'.center(80)}{RESET}
 {RED}{'Use it only on systems you own or have explicit permission to test.'.center(80)}{RESET}
-
 """
 
-# Divider bar
-divider = f"{CYAN}{'-' * 80}{RESET}"
 
-def header():
-    print(divider)
-    print(RED + title + RESET)
-    print(divider)
-
-header()
-
-def scan_ports(ip):
-    nm = nmap.PortScanner()
-    print(GREEN + "[*] Scanning ports on " + ip + RESET)
-    try:
-        nm.scan(ip)
-        now = datetime.now().strftime("%Y-%m-%d_%H-%M")
-        with open(f"{now}_port_scan.txt", "w") as f:
-            for host in nm.all_hosts():
-                host_info = f"Host: {host} ({nm[host].hostname()})\nState: {nm[host].state()}\n"
-                print(GREEN + host_info + RESET)
-                f.write(host_info)
-                for proto in nm[host].all_protocols():
-                    f.write(f"Protocol: {proto}\n")
-                    ports = nm[host][proto].keys()
-                    for port in sorted(ports):
-                        state = nm[host][proto][port]['state']
-                        line = f"Port: {port} State: {state}\n"
-                        print((GREEN if state == 'open' else RED) + line + RESET)
-                        f.write(line)
-        logging.info(f"Port scan completed for {ip}")
-    except Exception as e:
-        logging.error(traceback.format_exc())
-        print(RED + "[!] Error while scanning ports." + RESET)
-
-def scan_services(ip):
-    print(GREEN + "[*] Scanning services on " + ip + RESET)
-    now = datetime.now().strftime("%Y-%m-%d_%H-%M")
-    try:
-        with open(f"{now}_service_scan.txt", "w") as f:
-            for port in range(1, 65536):
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(0.1)
-                result = sock.connect_ex((ip, port))
-                if result == 0:
-                    try:
-                        service = socket.getservbyport(port)
-                    except:
-                        service = "unknown"
-                    line = f"Port: {port} Service: {service}\n"
-                    print(GREEN + line + RESET)
-                    f.write(line)
-                sock.close()
-        logging.info(f"Service scan completed for {ip}")
-    except Exception as e:
-        logging.error(traceback.format_exc())
-        print(RED + "[!] Error while scanning services." + RESET)
-
-scanned_urls = set()
-
-def run_sqlmap_command(args):
-    try:
-        process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        for line in process.stdout:
-            print(line.strip())
-    except KeyboardInterrupt:
-        print(RED + "\n[!] Operation interrupted by user." + RESET)
-    except Exception as e:
-        logging.error("SQLmap error: %s", traceback.format_exc())
-        print(RED + "[!] Error during sqlmap operation." + RESET)
-
-def sql_injection_advanced(url):
-    print(GREEN + f"[*] Testing for SQL injection: {url}" + RESET)
-
-    if url in scanned_urls:
-        print(YELLOW + "[!] Already tested this URL. Skipping..." + RESET)
-        return
-    scanned_urls.add(url)
-
-    print(CYAN + "[?] Enter custom SQLmap parameters or press Enter to use defaults" + RESET)
-    print(YELLOW + "Examples:" + RESET)
-    print("  --cookie=SESSIONID=abc123")
-    print("  --headers='X-Forwarded-For: 127.0.0.1\nUser-Agent: CustomAgent'")
-    print("  --level=5 --risk=3 --technique=BEUSTQ")
-    extra = input(GREEN + "Parameters > " + RESET)
-
-    cmd = ["sqlmap", "-u", url, "--batch"]
-    if extra:
-        cmd += extra.strip().split()
-    else:
-        cmd += ["--level=2", "--risk=1", "--random-agent", "--threads=4"]
-
-    run_sqlmap_command(cmd)
-
-    follow_up = input(CYAN + "[?] Do you want to enumerate databases? (yes/no): " + RESET)
-    if follow_up.lower() == "yes":
-        run_sqlmap_command(cmd + ["--dbs"])
-        dbname = input(CYAN + "[?] Enter a database name to enumerate tables: " + RESET)
-        run_sqlmap_command(cmd + ["-D", dbname, "--tables"])
-        table = input(CYAN + "[?] Enter table name to enumerate columns: " + RESET)
-        run_sqlmap_command(cmd + ["-D", dbname, "-T", table, "--columns"])
-        dump = input(CYAN + "[?] Do you want to dump data from this table? (yes/no): " + RESET)
-        if dump.lower() == "yes":
-            run_sqlmap_command(cmd + ["-D", dbname, "-T", table, "--dump"])
+divider = (
+    f"{CYAN}{'-' * 80}{RESET}"
+)
 
 
-# -- USER CHOICE MENU --
-def choose_dorking_method():
-    print("\n[?] Choose dorking provider:")
-    print("1. SerpAPI")
-    print("2. ScrapingAnt")
-    print("3. Google CSE")
-    choice = input("Select option (1/2/3): ").strip()
-    if choice == "1":
-        return serpapi_dork_search
-    elif choice == "2":
-        return scrapingant_dork_search
-    elif choice == "3":
-        return google_cse_dork_search
-    else:
-        print("[!] Invalid choice, defaulting to SerpAPI")
-        return serpapi_dork_search
-
-def extract_urls_from_soup(results):
+def header() -> None:
     """
-    Takes a list of result URLs (strings) and returns unique ones with '=' in them.
-    Handles duplicates and formats if necessary.
+    Display Chanakya's main header.
     """
-    urls = set()
-    for link in results:
-        if isinstance(link, str) and "=" in link:
-            urls.add(link.strip())
-    return urls
 
-def auto_dorking():
-    print(CYAN + "[?] Choose a dorking service:" + RESET)
-    print("1. SerpAPI")
-    print("2. ScrapingAnt")
-    print("3. Google Programmable Search (CSE)")
-    service = input(GREEN + "> " + RESET).strip()
+    print(divider)
+    print(title)
+    print(divider)
 
-    use_proxies = input(CYAN + "[?] Do you want to use proxies while scraping? (yes/no): " + RESET).lower().startswith("y")
 
-    try:
-        with open("dorks.txt", "r") as f:
-            raw_dorks = [line.strip() for line in f if line.strip() and not line.startswith("#")]
-    except FileNotFoundError:
-        print(RED + "[!] dorks.txt file not found. Please make sure it's in the tool directory." + RESET)
+def clear_screen() -> None:
+    """
+    Clear terminal cross-platform.
+    """
+
+    command = (
+        "cls"
+        if platform.system().lower() == "windows"
+        else "clear"
+    )
+
+    os.system(command)
+
+# ============================================================
+# AI STATUS
+# ============================================================
+
+def show_ai_status() -> None:
+    """
+    Display configured AI provider.
+    """
+
+    print(
+        CYAN
+        + "[*] AI Provider: "
+        + RESET,
+        end="",
+    )
+
+    if not ai_analyzer.available:
+
+        print(
+            YELLOW
+            + "Not configured"
+            + RESET
+        )
+
         return
 
-    dorks = [f"inurl:{d}" if not d.lower().startswith("inurl:") else d for d in raw_dorks]
-    found_urls = []
-    scanned_history = load_dorked_history()
-    new_links = set()
+    try:
 
-    for dork in dorks:
-        print(CYAN + f"[*] Searching dork: {dork}" + RESET)
+        status = ai_analyzer.status()
 
-        # Choose scraping function
-        if service == "1":
-            result_urls = serpapi_dork_search(dork)
-        elif service == "2":
-            result_urls = scrapingant_dork_search(dork)  # removed invalid param
-        elif service == "3":
-            result_urls = google_cse_dork_search(dork)
-        else:
-            print(RED + "[!] Invalid service option." + RESET)
+    except Exception as exc:
+
+        logger.exception(
+            "Failed to retrieve AI analyzer status."
+        )
+
+        print(
+            RED
+            + "Unavailable"
+            + RESET
+        )
+
+        logger.error(
+            "AI status error: %s",
+            exc,
+        )
+
+        return
+
+    print(
+        GREEN
+        + status
+        + RESET
+    )
+
+    if ai_analyzer.provider == "Gemini":
+
+        print(
+            YELLOW
+            + "[*] OpenAI API key not available. "
+              "Using Gemini for analysis."
+            + RESET
+        )
+
+
+# ============================================================
+# MENU
+# ============================================================
+
+def show_menu() -> None:
+    """
+    Display the main Chanakya menu.
+    """
+
+    print()
+
+    print(
+        CYAN
+        + "[+] Recon, Exploit, or Exit? Choose wisely:"
+        + RESET
+    )
+
+    print()
+
+    print(
+        CYAN
+        + "NETWORK / RECON"
+        + RESET
+    )
+
+    print(
+        "1. Port scanning"
+    )
+
+    print(
+        "2. Service scanning"
+    )
+
+    print(
+        "3. SQL injection testing"
+    )
+
+    print(
+        "4. Auto Dorking + SQLi Enumeration"
+    )
+
+    print()
+
+    print(
+        CYAN
+        + "WEB ATTACK VALIDATION"
+        + RESET
+    )
+
+    print(
+        "5. IDOR / BOLA testing"
+    )
+
+    print(
+        "6. JWT security testing"
+    )
+
+    print(
+        "7. Command injection testing"
+    )
+
+    print(
+        "8. XSS testing"
+    )
+
+    print()
+
+    print(
+        CYAN
+        + "UTILITY"
+        + RESET
+    )
+
+    print(
+        "9. Fetch & Save Valid Proxies"
+    )
+
+    print(
+        "10. Exit the program"
+    )
+
+
+# ============================================================
+# TARGET INPUT
+# ============================================================
+
+def get_target(
+    prompt: str,
+) -> str | None:
+    """
+    Read and validate a basic target string.
+    """
+
+    try:
+
+        target = input(
+            CYAN
+            + prompt
+            + RESET
+        ).strip()
+
+    except EOFError:
+
+        print(
+            RED
+            + "\n[!] Input stream closed."
+            + RESET
+        )
+
+        return None
+
+    if not target:
+
+        print(
+            RED
+            + "[!] Target cannot be empty."
+            + RESET
+        )
+
+        return None
+
+    return target
+
+
+# ============================================================
+# PAUSE
+# ============================================================
+
+def pause() -> None:
+    """
+    Pause before returning to the main menu.
+    """
+
+    try:
+
+        input(
+            "\nPress Enter to continue..."
+        )
+
+    except (
+        EOFError,
+        KeyboardInterrupt,
+    ):
+
+        pass
+
+
+# ============================================================
+# MAIN APPLICATION
+# ============================================================
+
+def main() -> None:
+    """
+    Main Chanakya application loop.
+    """
+
+    clear_screen()
+
+    header()
+
+    show_ai_status()
+
+    while True:
+
+        print()
+
+        show_menu()
+
+        try:
+
+            option = input(
+                GREEN
+                + "\n> "
+                + RESET
+            ).strip()
+
+        except EOFError:
+
+            print(
+                RED
+                + "\n[!] Input stream closed."
+                + RESET
+            )
+
             return
 
-        if not result_urls:
-            print(RED + f"[!] Skipping dork due to failed fetch: {dork}" + RESET)
+        except KeyboardInterrupt:
+
+            print(
+                RED
+                + "\n[!] Operation interrupted by user."
+                + RESET
+            )
+
             continue
 
-        urls = extract_urls_from_soup(result_urls)
-        for url in urls:
-            if url not in scanned_history:
-                print(GREEN + f"[+] Found new: {url}" + RESET)
-                found_urls.append(url)
-                new_links.add(url)
-
-        time.sleep(random.uniform(2, 4))
-
-    vuln_sites = []
-    for url in found_urls:
         try:
-            test_url = url + "'"
-            r = requests.get(test_url, headers=get_random_headers(), timeout=5, verify=False)
-            if any(x in r.text.lower() for x in ["sql syntax", "mysql", "error in your sql", "warning"]):
-                print(GREEN + f"[!!!] Vulnerable: {url}" + RESET)
-                vuln_sites.append(url)
-        except:
-            continue
 
-    if new_links:
-        save_dorked_history(new_links)
+            # =================================================
+            # PORT SCANNING
+            # =================================================
 
-    if vuln_sites:
-        now = datetime.now().strftime("%Y-%m-%d_%H-%M")
-        filename = f"{now}_vuln_sites.txt"
-        with open(filename, 'w') as f:
-            for site in vuln_sites:
-                f.write(site + '\n')
-        print(GREEN + f"[*] Saved vulnerable sites to {filename}" + RESET)
+            if option == "1":
 
-        print(CYAN + "[?] Do you want to test any site with sqlmap? (yes/no)" + RESET)
-        choice = input("> ")
-        if choice.lower() == "yes":
-            for idx, site in enumerate(vuln_sites):
-                print(f"{idx+1}. {site}")
-            sel = input("Enter the number of the URL to test: ")
-            try:
-                sel_idx = int(sel) - 1
-                if 0 <= sel_idx < len(vuln_sites):
-                    sql_injection_advanced(vuln_sites[sel_idx])
-            except:
-                print(RED + "[!] Invalid selection." + RESET)
-    else:
-        print(YELLOW + "[*] No new vulnerable sites found." + RESET)
+                target = get_target(
+                    "[*] Enter the IP or domain to scan: "
+                )
 
+                if target:
 
-def main():
-    while True:
-        print(CYAN + "[+] Recon, Exploit, or Exit? Choose wisely:" + RESET)
-        print("1. Port scanning")
-        print("2. Service scanning")
-        print("3. SQL injection testing")
-        print("4. Auto Dorking + SQLi Enumeration")
-        print("5. Fetch & Save Valid Proxies")
-        print("6. Exit the program")
-        option = input(GREEN + "> " + RESET)
+                    scan_ports(
+                        target
+                    )
 
-        if option == "1":
-            ip = input(CYAN + "[*] Enter the IP or domain to scan: " + RESET)
-            scan_ports(ip)
-        elif option == "2":
-            ip = input(CYAN + "[*] Enter the IP or domain to scan: " + RESET)
-            scan_services(ip)
-        elif option == "3":
-            url = input(CYAN + "[*] Enter the URL to perform SQL injection testing: " + RESET)
-            sql_injection_advanced(url)
-        elif option == "4":
-            auto_dorking()
-        elif option == "5":
-            get_valid_proxies()
-        elif option == "6":
-            print(RED + "[*] Exiting the program..." + RESET)
-            print(YELLOW + "[♥] Made with ♥ by VirusZzWarning" + RESET)
-            print(GREEN + "[+] Happy hacking ;)" + RESET)
-            exit()
-        else:
-            print(RED + "[!] Invalid option." + RESET)
+            # =================================================
+            # SERVICE SCANNING
+            # =================================================
 
-        input("\nPress Enter to continue...")
-        os.system("clear")
+            elif option == "2":
+
+                target = get_target(
+                    "[*] Enter the IP or domain to scan: "
+                )
+
+                if target:
+
+                    scan_services(
+                        target
+                    )
+
+            # =================================================
+            # SQL INJECTION
+            # =================================================
+
+            elif option == "3":
+
+                target = get_target(
+                    "[*] Enter the URL to perform "
+                    "SQL injection testing: "
+                )
+
+                if target:
+
+                    sql_injection_advanced(
+                        target
+                    )
+
+            # =================================================
+            # DORKING
+            # =================================================
+
+            elif option == "4":
+
+                auto_dorking()
+
+            # =================================================
+            # IDOR / BOLA
+            # =================================================
+
+            elif option == "5":
+
+                run_attack_module(
+                    attack_name="idor",
+                    display_name="IDOR / BOLA TESTING",
+                )
+
+            # =================================================
+            # JWT
+            # =================================================
+
+            elif option == "6":
+
+                run_attack_module(
+                    attack_name="jwt",
+                    display_name="JWT SECURITY TESTING",
+                )
+
+            # =================================================
+            # COMMAND INJECTION
+            # =================================================
+
+            elif option == "7":
+
+                run_attack_module(
+                    attack_name="command_injection",
+                    display_name="COMMAND INJECTION TESTING",
+                )
+
+            # =================================================
+            # XSS
+            # =================================================
+
+            elif option == "8":
+
+                run_attack_module(
+                    attack_name="xss",
+                    display_name="XSS TESTING",
+                )
+
+            # =================================================
+            # PROXY FETCHING
+            # =================================================
+
+            elif option == "9":
+
+                get_valid_proxies()
+
+            # =================================================
+            # EXIT
+            # =================================================
+
+            elif option == "10":
+
+                print()
+
+                print(
+                    RED
+                    + "[*] Exiting the program..."
+                    + RESET
+                )
+
+                print(
+                    YELLOW
+                    + "[♥] Made with ♥ by VirusZzWarning"
+                    + RESET
+                )
+
+                print(
+                    GREEN
+                    + "[+] Happy hacking ;)"
+                    + RESET
+                )
+
+                return
+
+            # =================================================
+            # INVALID OPTION
+            # =================================================
+
+            else:
+
+                print()
+
+                print(
+                    RED
+                    + "[!] Invalid option."
+                    + RESET
+                )
+
+        except KeyboardInterrupt:
+
+            print()
+
+            print(
+                RED
+                + "[!] Operation interrupted by user."
+                + RESET
+            )
+
+        except Exception as exc:
+
+            logger.exception(
+                "Unhandled exception in main menu."
+            )
+
+            print()
+
+            print(
+                RED
+                + "[!] An unexpected error occurred."
+                + RESET
+            )
+
+            print(
+                YELLOW
+                + f"    Error: {exc}"
+                + RESET
+            )
+
+        # ----------------------------------------------------
+        # Return to menu
+        # ----------------------------------------------------
+
+        pause()
+
+        clear_screen()
+
         header()
 
+        show_ai_status()
+
+
+# ============================================================
+# ENTRY POINT
+# ============================================================
+
 if __name__ == "__main__":
-    main()
+
+    try:
+
+        main()
+
+    except KeyboardInterrupt:
+
+        print(
+            RED
+            + "\n\n[!] Chanakya terminated by user."
+            + RESET
+        )
+
+    except Exception as exc:
+
+        logger.exception(
+            "Fatal Chanakya error."
+        )
+
+        print()
+
+        print(
+            RED
+            + "[!] Fatal error:"
+            + RESET
+        )
+
+        print(
+            YELLOW
+            + f"    {exc}"
+            + RESET
+        )
